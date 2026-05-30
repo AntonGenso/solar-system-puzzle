@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0A1424">
+<title>Solar System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0A1424;
+    --cream:#F7ECCB;
+    --muted:#AFC0D6;
+    --sun-1:#FBC04A;
+    --sun-2:#F47A2E;
+    --ink:#3A1B05;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;}
+  body{
+    font-family:'Press Start 2P','Pixelify Sans',system-ui,monospace;
+    color:var(--cream);
+    background:
+      radial-gradient(120% 80% at 50% 18%, #16243f 0%, var(--bg) 60%),
+      var(--bg);
+    background-image:url('assets/index_bg.webp');
+    background-size:cover;
+    background-position:center top;
+    background-repeat:no-repeat;
+    overflow:hidden;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  /* переключатель языка — сверху */
+  .langbar{
+    position:fixed;top:max(16px, env(safe-area-inset-top));left:50%;
+    transform:translateX(-50%);z-index:3;
+    display:flex;gap:4px;padding:4px;border-radius:999px;
+    background:rgba(7,13,26,.55);backdrop-filter:blur(6px);
+    border:1px solid rgba(255,255,255,.12);
+    opacity:0;animation:fade .6s ease .1s forwards;
+  }
+  .langbar button{
+    font-family:inherit;font-weight:400;font-size:11px;letter-spacing:.02em;
+    color:var(--muted);background:transparent;border:none;cursor:pointer;
+    padding:7px 14px;border-radius:999px;transition:all .15s ease;
+  }
+  .langbar button.active{color:var(--ink);background:linear-gradient(180deg,var(--sun-1),var(--sun-2));}
+  .langbar button:focus-visible{outline:2px solid #fff;outline-offset:2px;}
+
+  .scrim{
+    position:fixed;left:0;right:0;bottom:0;height:62%;
+    background:linear-gradient(to top,
+      rgba(7,13,26,0.96) 0%,
+      rgba(7,13,26,0.86) 28%,
+      rgba(7,13,26,0.45) 64%,
+      rgba(7,13,26,0) 100%);
+    pointer-events:none;
+  }
+  .stage{
+    position:fixed;inset:0;
+    display:flex;flex-direction:column;justify-content:flex-end;align-items:center;
+    padding:0 24px max(34px, env(safe-area-inset-bottom)) 24px;
+  }
+  .card{width:100%;max-width:440px;text-align:center;}
+  .title{
+    margin:0;font-weight:700;line-height:1.05;
+    font-size:clamp(16px,4.7vw,26px);
+    color:var(--cream);letter-spacing:0;line-height:1.35;
+    text-shadow:0 3px 0 rgba(0,0,0,.25), 0 0 26px rgba(251,192,74,.18);
+    opacity:0;transform:translateY(16px);
+    animation:rise .7s cubic-bezier(.2,.7,.2,1) .18s forwards;
+  }
+  .title.swap{animation:swap .32s ease;}
+  .play{
+    display:inline-flex;align-items:center;justify-content:center;gap:12px;
+    margin-top:30px;width:100%;max-width:330px;min-height:64px;
+    padding:0 28px;border:none;border-radius:999px;cursor:pointer;
+    font-family:inherit;font-weight:400;font-size:clamp(13px,3.8vw,17px);
+    color:var(--ink);text-decoration:none;letter-spacing:.04em;
+    background:linear-gradient(180deg,var(--sun-1),var(--sun-2));
+    box-shadow:0 10px 28px rgba(244,122,46,.42), inset 0 2px 0 rgba(255,255,255,.45);
+    opacity:0;transform:translateY(16px);
+    animation:rise .7s cubic-bezier(.2,.7,.2,1) .42s forwards, pulse 2.6s ease-in-out 1.4s infinite;
+    transition:transform .12s ease, box-shadow .12s ease;
+  }
+  .play:active{transform:scale(.96);box-shadow:0 6px 16px rgba(244,122,46,.4);}
+  .play:focus-visible{outline:3px solid #fff;outline-offset:3px;}
+  .play .tri{
+    width:0;height:0;border-style:solid;
+    border-width:9px 0 9px 15px;border-color:transparent transparent transparent var(--ink);
+  }
+  @keyframes rise{to{opacity:1;transform:translateY(0);}}
+  @keyframes fade{to{opacity:1;}}
+  @keyframes swap{0%{opacity:0;transform:translateY(8px);}100%{opacity:1;transform:translateY(0);}}
+  @keyframes pulse{
+    0%,100%{box-shadow:0 10px 28px rgba(244,122,46,.42), inset 0 2px 0 rgba(255,255,255,.45);}
+    50%{box-shadow:0 10px 38px rgba(251,192,74,.62), inset 0 2px 0 rgba(255,255,255,.45);}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .title,.play,.langbar{animation:none;opacity:1;transform:none;}
+  }
+</style>
+</head>
+<body>
+  <nav class="langbar" id="langbar" aria-label="Language">
+    <button data-lang="uz">UZ</button>
+    <button data-lang="ru">RU</button>
+    <button data-lang="en" class="active">EN</button>
+  </nav>
+
+  <div class="scrim"></div>
+
+  <main class="stage">
+    <div class="card">
+      <h1 class="title" id="title">Solar System</h1>
+      <a id="play" class="play" href="game.html" aria-label="Play">
+        <span class="tri" aria-hidden="true"></span>PLAY
+      </a>
+    </div>
+  </main>
+
+  <script>
+    // Названия по языкам (меняется только заголовок; кнопка PLAY неизменна)
+    var TITLES = {
+      uz: "Quyosh tizimi",      // на проверку носителю
+      ru: "Солнечная система",
+      en: "Solar System"
+    };
+    var titleEl = document.getElementById('title');
+    var bar = document.getElementById('langbar');
+
+    function setLang(l){
+      titleEl.textContent = TITLES[l] || TITLES.en;
+      document.documentElement.lang = l;
+      bar.querySelectorAll('button').forEach(function(b){
+        b.classList.toggle('active', b.dataset.lang === l);
+      });
+      // мини-анимация смены
+      titleEl.classList.remove('swap'); void titleEl.offsetWidth; titleEl.classList.add('swap');
+    }
+
+    bar.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      setLang(b.dataset.lang);
+    });
+
+    // Прокидываем nickname (и прочие параметры платформы) в игру
+    document.getElementById('play').href = 'game.html' + (location.search || '');
+  </script>
+</body>
+</html>
