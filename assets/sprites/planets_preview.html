@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Solar System — 8 planets, animated</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #050C18;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 30px 20px;
+    font-family: -apple-system, system-ui, sans-serif;
+    color: #C8D4E8;
+    gap: 20px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: 1px;
+    opacity: 0.85;
+  }
+  canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    border: 2px solid rgba(120, 160, 200, 0.18);
+    border-radius: 10px;
+    box-shadow: 0 10px 50px rgba(0, 0, 0, 0.6);
+  }
+  .hint { font-size: 12px; opacity: 0.55; letter-spacing: 0.4px; }
+</style>
+</head>
+<body>
+
+<h1>SOLAR SYSTEM · 8 planets</h1>
+<canvas id="scene" width="1100" height="560"></canvas>
+<div class="hint">все планеты вращаются · наведи курсор для названия</div>
+
+<script>
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+// =========================================================
+// КОНСТАНТЫ
+// =========================================================
+const SPRITE_W = 40, SPRITE_H = 40;
+const CX = (SPRITE_W - 1) / 2;
+const CY = (SPRITE_H - 1) / 2;
+
+// Off-screen canvas для рендера планеты (один раз, потом scale)
+const offscreen = document.createElement('canvas');
+offscreen.width = SPRITE_W;
+offscreen.height = SPRITE_H;
+const offCtx = offscreen.getContext('2d');
+const imageData = offCtx.createImageData(SPRITE_W, SPRITE_H);
+
+// =========================================================
+// МАТЕМАТИКА
+// =========================================================
+function inCircle(x, y, radius) {
+  const dx = x - CX, dy = y - CY;
+  return dx*dx + dy*dy <= radius*radius;
+}
+
+function brightness(x, y, radius) {
+  const dx = x - CX, dy = y - CY;
+  const lx = dx - (-4), ly = dy - (-4);
+  return 1.0 - Math.sqrt(lx*lx + ly*ly) / (radius * 1.7);
+}
+
+// Сферические координаты для текстуры
+function sphereUV(x, y, radius) {
+  const dx = (x - CX) / radius;
+  const dy = (y - CY) / radius;
+  const r2 = dx*dx + dy*dy;
+  if (r2 > 1) return null;
+  const z = Math.sqrt(Math.max(0, 1 - r2));
+  const v = Math.asin(dy) / Math.PI + 0.5;
+  const cosLat = Math.cos(Math.asin(dy));
+  let u;
+  if (cosLat < 0.01) u = 0.5;
+  else u = Math.atan2(dx, z) / (Math.PI * 2) + 0.5;
+  return { u, v };
+}
+
+// Псевдослучайная функция для текстуры
+function hash(x, y, seed) {
+  const k = Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453;
+  return k - Math.floor(k);
+}
+
+// =========================================================
+// ПАЛИТРЫ ПЛАНЕТ (hex → [r,g,b])
+// =========================================================
+function hex(s) {
+  return [parseInt(s.slice(1,3),16), parseInt(s.slice(3,5),16), parseInt(s.slice(5,7),16)];
+}
+
+const PALETTES = {
+  mercury: { L: hex('#A89A88'), m: hex('#74675A'), d: hex('#4A3D32'), D: hex('#1A1228') },
+  venus:   { L: hex('#F4E090'), l: hex('#E0B85C'), m: hex('#B88030'), d: hex('#7C4F1A'), D: hex('#1A1228') },
+  earth:   { B: hex('#5C95D0'), b: hex('#2C5C9C'), o: hex('#1A3A6E'), G: hex('#7CC480'), g: hex('#3A7A48'), L: hex('#F0F4F8'), D: hex('#1A1228') },
+  mars:    { L: hex('#F08C4C'), l: hex('#D8682C'), m: hex('#A8451C'), d: hex('#702C14'), W: hex('#F8E4D0'), D: hex('#1A1228') },
+  jupiter: { L: hex('#F0DCB0'), l: hex('#C89860'), m: hex('#8C5C2C'), d: hex('#583612'), R: hex('#C84020'), r: hex('#8C2810'), D: hex('#1A1228') },
+  saturn:  { L: hex('#F0DCB0'), l: hex('#D0A878'), m: hex('#945C28'), d: hex('#583612'), K: hex('#E0C088'), k: hex('#90683C'), D: hex('#1A1228') },
+  uranus:  { L: hex('#B8E8E0'), l: hex('#7CC4C0'), m: hex('#3A8088'), d: hex('#1A4A55'), K: hex('#A0D4D0'), k: hex('#508088'), D: hex('#1A1228') },
+  neptune: { L: hex('#7CA4E8'), l: hex('#3C68B8'), m: hex('#1A3A88'), d: hex('#0C1F58'), D: hex('#1A1228') },
+  sun:     { W: hex('#FFF8DC'), L: hex('#FCE490'), l: hex('#F8B840'), m: hex('#F48C28'), dk: hex('#D45018'), rd: hex('#A02C10'), D: hex('#1A1228') },
+};
+
+const BG_COLOR = [10, 20, 36]; // фон, в который заливаем пустые пиксели
+
+// =========================================================
+// ОЧИСТКА БУФЕРА
+// =========================================================
+function clearBuffer() {
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 0; d[i+1] = 0; d[i+2] = 0; d[i+3] = 0;  // прозрачный
+  }
+}
+
+function setPixel(x, y, color) {
+  if (x < 0 || x >= SPRITE_W || y < 0 || y >= SPRITE_H) return;
+  if (!color) return;
+  const idx = (y * SPRITE_W + x) * 4;
+  imageData.data[idx]   = color[0];
+  imageData.data[idx+1] = color[1];
+  imageData.data[idx+2] = color[2];
+  imageData.data[idx+3] = 255;
+}
+
+// =========================================================
+// ШУМОВАЯ ФУНКЦИЯ для процедурных текстур
+// Возвращает значение примерно в [-1, 1]. При плавном изменении u
+// результат тоже меняется плавно — это даёт непрерывную анимацию.
+// =========================================================
+function fractalNoise(u, v, scale, octaves) {
+  let val = 0;
+  let amp = 1;
+  let freq = scale;
+  let norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    const n = Math.sin(u * freq * Math.PI * 2) * Math.cos(v * freq * Math.PI) +
+              Math.sin(u * freq * Math.PI * 2.7 + 1.3) * Math.cos(v * freq * Math.PI * 1.3 + 0.7);
+    val += n * amp;
+    norm += amp;
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return val / norm;
+}
+
+// =========================================================
+// МЕРКУРИЙ
+// =========================================================
+function drawMercury(rotation, time) {
+  const radius = 9;
+  const P = PALETTES.mercury;
+  
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      if (!inCircle(x, y, radius)) continue;
+      const d = Math.sqrt((x-CX)**2 + (y-CY)**2);
+      const b = brightness(x, y, radius);
+      const uv = sphereUV(x, y, radius);
+      if (!uv) continue;
+      
+      const uRot = (uv.u + rotation) % 1.0;
+      // Шум кратеров и теней
+      const noise = fractalNoise(uRot, uv.v, 5, 2);
+      const noise2 = fractalNoise(uRot + 0.7, uv.v + 0.3, 8, 2);
+      
+      // Базовый цвет по освещению
+      let base;
+      if (d > radius - 0.7) base = b < 0.5 ? P.D : P.d;
+      else if (b > 0.65) base = P.L;
+      else if (b > 0.4) base = P.m;
+      else if (b > 0.15) base = P.d;
+      else base = P.D;
+      
+      // Модификация шумом
+      if (noise > 0.4) {
+        // Тёмные кратеры
+        if (base === P.L) base = P.m;
+        else if (base === P.m) base = P.d;
+      } else if (noise2 > 0.5 && b > 0.45) {
+        // Светлые ободки
+        if (base === P.m) base = P.L;
+        else if (base === P.d) base = P.m;
+      }
+      
+      setPixel(x, y, base);
+    }
+  }
+}
+
+// =========================================================
+// ВЕНЕРА
+// =========================================================
+function drawVenus(rotation, time) {
+  const radius = 12;
+  const P = PALETTES.venus;
+  
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      if (!inCircle(x, y, radius)) continue;
+      const d = Math.sqrt((x-CX)**2 + (y-CY)**2);
+      const b = brightness(x, y, radius);
+      const uv = sphereUV(x, y, radius);
+      if (!uv) continue;
+      
+      const uRot = (uv.u + rotation) % 1.0;
+      // Облачные завихрения — крупный шум
+      const noiseCloud = fractalNoise(uRot, uv.v, 2, 3);
+      // Мелкие детали
+      const noiseDetail = fractalNoise(uRot + 0.4, uv.v + 0.2, 5, 2);
+      
+      let base;
+      if (d > radius - 0.7) base = b < 0.4 ? P.D : P.d;
+      else if (b > 0.75) base = P.L;
+      else if (b > 0.5) base = P.l;
+      else if (b > 0.25) base = P.m;
+      else base = P.d;
+      
+      // Светлые облачные пятна
+      if (noiseCloud > 0.2) {
+        if (base === P.m) base = P.l;
+        else if (base === P.l) base = P.L;
+      } else if (noiseCloud < -0.3) {
+        // Тёмные провалы
+        if (base === P.L) base = P.l;
+        else if (base === P.l) base = P.m;
+      }
+      
+      // Мелкие детали — яркие точки
+      if (noiseDetail > 0.5 && b > 0.4) {
+        if (base === P.l) base = P.L;
+      }
+      
+      setPixel(x, y, base);
+    }
+  }
+}
+
+// =========================================================
+// ЗЕМЛЯ
+// =========================================================
+function drawEarth(rotation, time) {
+  const radius = 12;
+  const P = PALETTES.earth;
+  const t = time * 0.001;
+  // Облака дрейфуют независимо от планеты
+  const cloudDrift = t * 0.020;
+  
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      if (!inCircle(x, y, radius)) continue;
+      const d = Math.sqrt((x-CX)**2 + (y-CY)**2);
+      const b = brightness(x, y, radius);
+      const uv = sphereUV(x, y, radius);
+      if (!uv) continue;
+      
+      const uRotLand = (uv.u + rotation) % 1.0;
+      const uRotCloud = (uv.u + rotation + cloudDrift) % 1.0;
+      
+      // Шум континентов
+      const noiseLand = fractalNoise(uRotLand, uv.v, 2.5, 3);
+      // Шум облаков (другая частота, движется отдельно)
+      const noiseCloud = fractalNoise(uRotCloud + 0.3, uv.v + 0.2, 4, 2);
+      
+      // Полярные шапки (по широте)
+      const polarDist = Math.abs(uv.v - 0.5);
+      const isPole = polarDist > 0.42;
+      
+      const isLand = noiseLand > 0.15;
+      const isCloud = noiseCloud > 0.5;
+      
+      let base;
+      if (isPole) {
+        if (d > radius - 0.7) base = b < 0.4 ? P.D : P.o;
+        else base = P.L;
+      } else if (isCloud && !isLand) {
+        // Облака только над океаном (на суше реже)
+        base = P.L;
+      } else if (isLand) {
+        // Суша
+        if (d > radius - 0.7) base = b < 0.4 ? P.D : P.g;
+        else if (b > 0.55) base = P.G;
+        else base = P.g;
+      } else {
+        // Океан
+        if (d > radius - 0.7) base = b < 0.4 ? P.D : P.o;
+        else if (b > 0.65) base = P.B;
+        else if (b > 0.35) base = P.b;
+        else base = P.o;
+      }
+      
+      setPixel(x, y, base);
+    }
+  }
+}
+
+// =========================================================
+// МАРС
+// =========================================================
+function drawMars(rotation, time) {
+  const radius = 10;
+  const P = PALETTES.mars;
+  
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      if (!inCircle(x, y, radius)) continue;
+      const d = Math.sqrt((x-CX)**2 + (y-CY)**2);
+      const b = brightness(x, y, radius);
+      const uv = sphereUV(x, y, radius);
+      if (!uv) continue;
+      
+      const uRot = (uv.u + rotation) % 1.0;
+      // Шум тёмных областей "мария"
+      const noiseDark = fractalNoise(uRot, uv.v, 2, 3);
+      // Шум кратеров (мелкая частота)
+      const noiseCraters = fractalNoise(uRot + 0.5, uv.v + 0.3, 6, 2);
+      
+      // Полярные шапки
+      const polarDist = Math.abs(uv.v - 0.5);
+      const isPole = polarDist > 0.42;
+      
+      let base;
+      if (isPole) {
+        if (d > radius - 0.7) base = b < 0.4 ? P.D : P.d;
+        else base = P.W;
+      } else {
+        // Базовый цвет
+        if (d > radius - 0.7) base = b < 0.4 ? P.D : P.d;
+        else if (b > 0.7) base = P.L;
+        else if (b > 0.5) base = P.l;
+        else if (b > 0.3) base = P.m;
+        else base = P.d;
+        
+        // Тёмные мария
+        if (noiseDark > 0.3) {
+          if (base === P.L) base = P.l;
+          else if (base === P.l) base = P.m;
+          else if (base === P.m) base = P.d;
+        } else if (noiseCraters > 0.6 && b > 0.4) {
+          // Светлые блики (кратеры)
+          if (base === P.m) base = P.l;
+          else if (base === P.l) base = P.L;
+        }
+      }
+      
+      setPixel(x, y, base);
+    }
+  }
+}
+
+// =========================================================
+// ЮПИТЕР
+// =========================================================
+function jupiterBand(v, u) {
+  // Лёгкое искривление полос
+  const wave = Math.sin(u * 6 + v * 4) * 0.012;
+  const vAdj = v + wave;
+  
+  const bands = [
+    [0.00, 0.10, 'L'],
+    [0.10, 0.16, 'l'],
+    [0.16, 0.24, 'm'],   // NEB
+    [0.24, 0.32, 'l'],
+    [0.32, 0.42, 'L'],
+    [0.42, 0.50, 'l'],
+    [0.50, 0.58, 'L'],
+    [0.58, 0.68, 'l'],
+    [0.68, 0.76, 'm'],   // SEB
+    [0.76, 0.84, 'l'],
+    [0.84, 0.90, 'L'],
+    [0.90, 1.00, 'l'],
+  ];
+  for (const [lo, hi, ch] of bands) {
+    if (lo <= vAdj && vAdj < hi) return ch;
+  }
+  return 'L';
+}
+
+function drawJupiter(rotation, time) {
+  const radius = 16;
+  const P = PALETTES.jupiter;
+  
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      if (!inCircle(x, y, radius)) continue;
+      const d = Math.sqrt((x-CX)**2 + (y-CY)**2);
+      const b = brightness(x, y, radius);
+      const uv = sphereUV(x, y, radius);
+      if (!uv) { setPixel(x, y, P.m); continue; }
+      
+      const uRot = (uv.u + rotation) % 1.0;
+      const base = jupiterBand(uv.v, uRot * Math.PI * 2);
+      
+      let c;
+      if (d > radius - 0.7) c = b < 0.4 ? P.D : P.d;
+      else if (b < 0.2) {
+        if (base === 'L' || base === 'l') c = P.m;
+        else if (base === 'm') c = P.d;
+        else c = P.d;
+      } else if (b < 0.4) {
+        if (base === 'L') c = P.l;
+        else c = P[base];
+      } else if (b > 0.8) {
+        if (base === 'm') c = P.l;
+        else if (base === 'l') c = P.L;
+        else c = P[base];
+      } else {
+        c = P[base];
+      }
+      setPixel(x, y, c);
+    }
+  }
+  
+  // БКП — большой и заметный, движется с долготой
+  const spotLon = 0.3;
+  const spotLat = 0.18;
+  const lon = (spotLon - rotation + 1.0) % 1.0;
+  const lonRad = (lon - 0.5) * Math.PI;
+  const latRad = spotLat * Math.PI;
+  const cosLat = Math.cos(latRad);
+  const px = CX + Math.sin(lonRad) * radius * cosLat;
+  const py = CY + Math.sin(latRad) * radius;
+  const z = Math.cos(lonRad) * cosLat;
+  
+  if (z > 0.2) {
+    const cxi = Math.round(px), cyi = Math.round(py);
+    const visibility = z;
+    // Овал 5x3 — но сжимаем по x у горизонта
+    const ovalW = 3 * visibility;
+    const ovalH = 1.5;
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -4; dx <= 4; dx++) {
+        if ((dx*dx)/(ovalW*ovalW) + (dy*dy)/(ovalH*ovalH) <= 1.0) {
+          const nx = cxi + dx, ny = cyi + dy;
+          if (inCircle(nx, ny, radius - 1)) setPixel(nx, ny, P.r);
+        }
+      }
+    }
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        const innerW = ovalW * 0.7, innerH = ovalH * 0.6;
+        if ((dx*dx)/(innerW*innerW) + (dy*dy)/(innerH*innerH) <= 1.0) {
+          const nx = cxi + dx, ny = cyi + dy;
+          if (inCircle(nx, ny, radius - 1)) setPixel(nx, ny, P.R);
+        }
+      }
+    }
+    if (inCircle(cxi, cyi, radius - 1)) setPixel(cxi, cyi, P.r);
+  }
+}
+
+// =========================================================
+// САТУРН
+// =========================================================
+function saturnBand(v) {
+  const bands = [
+    [0.00, 0.18, 'L'],
+    [0.18, 0.33, 'l'],
+    [0.33, 0.50, 'L'],
+    [0.50, 0.65, 'l'],
+    [0.65, 0.82, 'L'],
+    [0.82, 1.00, 'm'],
+  ];
+  for (const [lo, hi, ch] of bands) {
+    if (lo <= v && v < hi) return ch;
+  }
+  return 'L';
+}
+
+function drawSaturn(rotation, time) {
+  const radius = 10;
+  const P = PALETTES.saturn;
+  
+  // Параметры кольца
+  const ringOuterA = 18, ringOuterB = 4;
+  const ringInnerA = 12, ringInnerB = 2.7;
+  
+  function ringColorAt(dx, dy) {
+    if ((dx/ringInnerA)**2 + (dy/ringInnerB)**2 <= 1.0) return null;
+    if ((dx/ringOuterA)**2 + (dy/ringOuterB)**2 > 1.0) return null;
+    const rNorm = Math.abs(dx)/ringOuterA + Math.abs(dy)/ringOuterB * 0.5;
+    if (rNorm > 0.92) return P.k;
+    if (rNorm > 0.75) return P.K;
+    if (rNorm > 0.65) return P.k;
+    return P.K;
+  }
+  
+  // 1. Задняя половина колец
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      const dy = y - CY;
+      if (dy >= 0) continue;
+      const dx = x - CX;
+      const c = ringColorAt(dx, dy);
+      if (c && !inCircle(x, y, radius)) {
+        setPixel(x, y, c);
+      }
+    }
+  }
+  
+  // 2. Планета (с полосами и вращением)
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      if (!inCircle(x, y, radius)) continue;
+      const d = Math.sqrt((x-CX)**2 + (y-CY)**2);
+      const b = brightness(x, y, radius);
+      const uv = sphereUV(x, y, radius);
+      if (!uv) { setPixel(x, y, P.m); continue; }
+      
+      // Полосы с лёгкой волной + вращение для текстуры
+      const wave = Math.sin((uv.u + rotation) * Math.PI * 4 + uv.v * 4) * 0.01;
+      const base = saturnBand(uv.v + wave);
+      
+      let c;
+      if (d > radius - 0.7) c = b < 0.4 ? P.D : P.d;
+      else if (b < 0.2) c = base === 'm' ? P.d : P.m;
+      else if (b < 0.4) c = base === 'L' ? P.l : P[base];
+      else if (b > 0.8) c = base === 'm' ? P.l : P.L;
+      else c = P[base];
+      setPixel(x, y, c);
+    }
+  }
+  
+  // 3. Передняя половина колец
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      const dy = y - CY;
+      if (dy < 0) continue;
+      const dx = x - CX;
+      const c = ringColorAt(dx, dy);
+      if (c) setPixel(x, y, c);
+    }
+  }
+}
+
+// =========================================================
+// УРАН
+// =========================================================
+function drawUranus(rotation, time) {
+  const radius = 9;
+  const P = PALETTES.uranus;
+  
+  // Кольца наклонены на 45° (между вертикальным и горизонтальным)
+  const ringOuterA = 4, ringOuterB = 16;
+  const ringInnerA = 2.7, ringInnerB = 12;
+  
+  // Угол наклона: 45° = π/4
+  // Поворот координат: dx', dy' = поворот (dx, dy) на -45°
+  const tiltAngle = Math.PI / 4;
+  const cosT = Math.cos(tiltAngle);
+  const sinT = Math.sin(tiltAngle);
+  
+  function ringColorAt(dx, dy) {
+    // Поворачиваем координаты для проверки эллипса
+    const dxr = dx * cosT + dy * sinT;
+    const dyr = -dx * sinT + dy * cosT;
+    
+    if ((dxr/ringInnerA)**2 + (dyr/ringInnerB)**2 <= 1.0) return null;
+    if ((dxr/ringOuterA)**2 + (dyr/ringOuterB)**2 > 1.0) return null;
+    const rNorm = Math.abs(dxr)/ringOuterA * 0.5 + Math.abs(dyr)/ringOuterB;
+    if (rNorm > 0.92) return P.k;
+    if (rNorm > 0.75) return P.K;
+    if (rNorm > 0.65) return P.k;
+    return P.K;
+  }
+  
+  // Передняя/задняя половина определяется по знаку dxr (повёрнутой координаты)
+  function isFront(dx, dy) {
+    const dxr = dx * cosT + dy * sinT;
+    return dxr >= 0;
+  }
+  
+  // 1. Задние кольца
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      const dx = x - CX, dy = y - CY;
+      if (isFront(dx, dy)) continue;
+      const c = ringColorAt(dx, dy);
+      if (c && !inCircle(x, y, radius)) setPixel(x, y, c);
+    }
+  }
+  
+  // 2. Планета
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      if (!inCircle(x, y, radius)) continue;
+      const d = Math.sqrt((x-CX)**2 + (y-CY)**2);
+      const b = brightness(x, y, radius);
+      
+      // Слабая текстура полос (под наклоном из-за оси)
+      const uv = sphereUV(x, y, radius);
+      let tex = 0;
+      if (uv) {
+        tex = Math.sin((uv.u + rotation) * Math.PI * 6) * 0.05;
+      }
+      
+      let c;
+      const bAdj = b + tex;
+      if (d > radius - 0.7) c = bAdj < 0.4 ? P.D : P.d;
+      else if (bAdj > 0.7) c = P.L;
+      else if (bAdj > 0.45) c = P.l;
+      else if (bAdj > 0.2) c = P.m;
+      else c = P.d;
+      setPixel(x, y, c);
+    }
+  }
+  
+  // 3. Передние кольца
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      const dx = x - CX, dy = y - CY;
+      if (!isFront(dx, dy)) continue;
+      const c = ringColorAt(dx, dy);
+      if (c) setPixel(x, y, c);
+    }
+  }
+}
+
+// =========================================================
+// НЕПТУН
+// =========================================================
+function drawNeptune(rotation, time) {
+  const radius = 10;
+  const P = PALETTES.neptune;
+  const t = time * 0.001;
+  // Облака движутся быстрее планеты — характерная черта Нептуна
+  const cloudDrift = t * 0.025;
+  
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      if (!inCircle(x, y, radius)) continue;
+      const d = Math.sqrt((x-CX)**2 + (y-CY)**2);
+      const b = brightness(x, y, radius);
+      const uv = sphereUV(x, y, radius);
+      if (!uv) continue;
+      
+      const uRot = (uv.u + rotation) % 1.0;
+      const uCloud = (uv.u + rotation + cloudDrift) % 1.0;
+      
+      // Полосы по широте (Нептун — газовый гигант)
+      const bandMod = Math.sin(uv.v * Math.PI * 6) * 0.06;
+      // Тёмные шторма
+      const noiseStorms = fractalNoise(uRot, uv.v, 2.5, 3);
+      // Светлые облачные штрихи (движутся быстрее)
+      const noiseClouds = fractalNoise(uCloud * 1.5 + 0.3, uv.v + 0.1, 4, 2);
+      
+      const bAdj = b + bandMod;
+      
+      let base;
+      if (d > radius - 0.7) base = b < 0.4 ? P.D : P.d;
+      else if (bAdj > 0.7) base = P.L;
+      else if (bAdj > 0.45) base = P.l;
+      else if (bAdj > 0.2) base = P.m;
+      else if (bAdj > 0.05) base = P.d;
+      else base = P.D;
+      
+      // Тёмные шторма
+      if (noiseStorms < -0.4) {
+        if (base === P.L) base = P.l;
+        else if (base === P.l) base = P.m;
+        else if (base === P.m) base = P.d;
+      } else if (noiseClouds > 0.5 && b > 0.4) {
+        // Светлые облачные штрихи
+        if (base === P.m) base = P.l;
+        else if (base === P.l) base = P.L;
+        else if (base === P.dk) base = P.m;
+      }
+      
+      setPixel(x, y, base);
+    }
+  }
+}
+
+// =========================================================
+// СОЛНЦЕ
+// =========================================================
+function drawSun(rotation, time) {
+  const radius = 14;
+  const P = PALETTES.sun;
+  
+  for (let y = 0; y < SPRITE_H; y++) {
+    for (let x = 0; x < SPRITE_W; x++) {
+      if (!inCircle(x, y, radius)) continue;
+      const d = Math.sqrt((x-CX)**2 + (y-CY)**2);
+      const uv = sphereUV(x, y, radius);
+      if (!uv) continue;
+      
+      const uRot = (uv.u + rotation) % 1.0;
+      // Радиальная яркость — от центра к краю
+      const radial = 1.0 - d / radius;
+      // Грануляция поверхности
+      const granule = fractalNoise(uRot, uv.v, 4, 3) * 0.15;
+      // Тёмные пятна
+      const sunspots = fractalNoise(uRot + 0.5, uv.v + 0.3, 2, 2);
+      
+      const bright = radial + granule;
+      
+      let base;
+      if (d > radius - 0.7) base = P.rd;
+      else if (d > radius - 1.5) base = P.dk;
+      else if (bright > 0.85) base = P.W;
+      else if (bright > 0.65) base = P.L;
+      else if (bright > 0.45) base = P.l;
+      else if (bright > 0.25) base = P.m;
+      else base = P.dk;
+      
+      // Тёмные пятна
+      if (sunspots > 0.55 && d < radius - 2) {
+        if (base === P.W) base = P.L;
+        else if (base === P.L) base = P.m;
+        else if (base === P.l) base = P.dk;
+        else if (base === P.m) base = P.dk;
+      }
+      
+      setPixel(x, y, base);
+    }
+  }
+}
+
+// =========================================================
+// ОБЩИЙ РЕНДЕР ПЛАНЕТЫ
+// =========================================================
+const DRAW_FUNCS = {
+  sun: drawSun,
+  mercury: drawMercury,
+  venus: drawVenus,
+  earth: drawEarth,
+  mars: drawMars,
+  jupiter: drawJupiter,
+  saturn: drawSaturn,
+  uranus: drawUranus,
+  neptune: drawNeptune,
+};
+
+function renderPlanet(id, cx, cy, scale, rotation, time) {
+  clearBuffer();
+  DRAW_FUNCS[id](rotation, time);
+  offCtx.putImageData(imageData, 0, 0);
+  
+  // Копируем на основной canvas с масштабированием
+  ctx.drawImage(
+    offscreen,
+    0, 0, SPRITE_W, SPRITE_H,
+    Math.floor(cx - SPRITE_W * scale / 2),
+    Math.floor(cy - SPRITE_H * scale / 2),
+    SPRITE_W * scale,
+    SPRITE_H * scale
+  );
+}
+
+// =========================================================
+// РАСКЛАДКА И АНИМАЦИЯ
+// =========================================================
+const PLANETS = [
+  { id: 'sun',     name: 'Sun',     size: 1.30, rotSpeed: 0.00020 },
+  { id: 'mercury', name: 'Mercury', size: 0.55, rotSpeed: 0.00013 },
+  { id: 'venus',   name: 'Venus',   size: 0.75, rotSpeed: 0.00012 },
+  { id: 'earth',   name: 'Earth',   size: 0.80, rotSpeed: 0.00015 },
+  { id: 'mars',    name: 'Mars',    size: 0.68, rotSpeed: 0.00013 },
+  { id: 'jupiter', name: 'Jupiter', size: 1.20, rotSpeed: 0.00008 },
+  { id: 'saturn',  name: 'Saturn',  size: 1.05, rotSpeed: 0.00025 },
+  { id: 'uranus',  name: 'Uranus',  size: 0.85, rotSpeed: 0.00008 },
+  { id: 'neptune', name: 'Neptune', size: 0.85, rotSpeed: 0.00012 },
+];
+
+// Спрайт ракеты (статичный, 14×19)
+const ROCKET_SPRITE = [
+  '......DD......', '.....DRRD.....', '.....DRRD.....', '....DRrrRD....',
+  '....DWGGWD....', '...DWWWWWWD...', '...DWWWWWGD...', '...DWWbbWGD...',
+  '...DWbLBBGD...', '...DWbBBBGD...', '...DWWbbWGD...', '...DWWWWWGD...',
+  '...DWWWWWGD...', '..DRWWWWWGRD..', '.DRrWWWWWGrRD.', '.DRrDWWWGDrRD.',
+  '.DrDDGGGgDDrD.', '..D..DggD..D..', '.....DDDD.....',
+];
+const ROCKET_W = 14, ROCKET_H = 19;
+const ROCKET_PALETTE = {
+  '.': null, 'D': hex('#1A2A3E'), 'W': hex('#D8D0C0'), 'G': hex('#A5A39A'),
+  'g': hex('#6E6E72'), 'B': hex('#3F6580'), 'b': hex('#1F3A52'),
+  'L': hex('#8FB8D0'), 'R': hex('#E1611A'), 'r': hex('#B84C1C'),
+};
+
+function drawRocket(cx, cy, scale, bob) {
+  for (let y = 0; y < ROCKET_H; y++) {
+    for (let x = 0; x < ROCKET_W; x++) {
+      const ch = ROCKET_SPRITE[y][x];
+      const color = ROCKET_PALETTE[ch];
+      if (!color) continue;
+      ctx.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`;
+      ctx.fillRect(
+        Math.floor(cx + (x - ROCKET_W/2) * scale),
+        Math.floor(cy + (y - ROCKET_H/2) * scale + bob),
+        scale, scale
+      );
+    }
+  }
+  // Огонь снизу — пульсирующий
+  const t = performance.now() * 0.005;
+  const flicker = Math.sin(t) * 0.5 + 0.5;
+  const fy = cy + (ROCKET_H/2) * scale + bob;
+  const fx = cx;
+  // Слои огня
+  const flame_red = `rgb(184, 76, 28)`;
+  const flame_orange = `rgb(225, 97, 26)`;
+  const flame_yellow = `rgb(248, 160, 48)`;
+  
+  ctx.fillStyle = flame_red;
+  ctx.fillRect(Math.floor(fx - 2*scale), Math.floor(fy), 4*scale, scale*2);
+  ctx.fillRect(Math.floor(fx - scale), Math.floor(fy + 2*scale), 2*scale, scale*2);
+  
+  ctx.fillStyle = flame_orange;
+  ctx.fillRect(Math.floor(fx - scale), Math.floor(fy), 2*scale, scale*2);
+  ctx.fillRect(Math.floor(fx - 0.5*scale), Math.floor(fy + 2*scale), scale, scale * (1 + flicker));
+  
+  ctx.fillStyle = flame_yellow;
+  ctx.fillRect(Math.floor(fx - 0.5*scale), Math.floor(fy), scale, scale * 1.5);
+}
+
+const cols = 5, rows = 2;
+const cellW = canvas.width / cols;
+const cellH = (canvas.height - 60) / rows;
+const positions = PLANETS.map((_, i) => ({
+  x: cellW * (i % cols) + cellW / 2,
+  y: cellH * Math.floor(i / cols) + cellH / 2 + 20,
+}));
+// Позиция ракеты — 10-я ячейка (правый нижний угол)
+const rocketPos = {
+  x: cellW * 4 + cellW / 2,
+  y: cellH * 1 + cellH / 2 + 20,
+};
+
+const rotations = PLANETS.map(() => Math.random());
+
+// Звёзды
+const stars = [];
+for (let i = 0; i < 240; i++) {
+  stars.push({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    size: Math.random() < 0.6 ? 1 : (Math.random() < 0.88 ? 2 : 3),
+    twinkle: Math.random() * Math.PI * 2,
+    twinkleSpeed: 0.01 + Math.random() * 0.04,
+    type: Math.random() < 0.93 ? 'dot' : 'cross',
+  });
+}
+
+function drawCrossStar(x, y, color, size) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x - size, y, size * 2 + 1, 1);
+  ctx.fillRect(x, y - size, 1, size * 2 + 1);
+}
+
+// Hover
+let mouseX = -1, mouseY = -1;
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+  mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+});
+canvas.addEventListener('mouseleave', () => { mouseX = -1; mouseY = -1; });
+
+// Цикл
+let lastTime = performance.now();
+function loop(now) {
+  const dt = Math.min(50, now - lastTime);
+  lastTime = now;
+  
+  // Фон
+  ctx.fillStyle = '#0A1424';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // Звёзды
+  stars.forEach(s => {
+    s.twinkle += s.twinkleSpeed;
+    const a = 0.3 + 0.5 * Math.sin(s.twinkle);
+    if (s.type === 'cross') {
+      drawCrossStar(s.x, s.y, `rgba(250, 205, 96, ${a * 0.85})`, 1);
+    } else {
+      ctx.fillStyle = `rgba(200, 220, 255, ${a})`;
+      ctx.fillRect(s.x, s.y, s.size, s.size);
+    }
+  });
+  
+  // Планеты
+  let hoveredIdx = -1;
+  for (let i = 0; i < PLANETS.length; i++) {
+    rotations[i] += PLANETS[i].rotSpeed * dt;
+    const p = PLANETS[i];
+    const pos = positions[i];
+    const scale = 4 * p.size;
+    
+    const planetPixelR = 14 * scale;
+    if (Math.hypot(mouseX - pos.x, mouseY - pos.y) < planetPixelR) {
+      hoveredIdx = i;
+    }
+    
+    renderPlanet(p.id, pos.x, pos.y, scale, rotations[i], now);
+  }
+  
+  // Ракета — статичный спрайт с покачиванием
+  const rocketBob = Math.sin(now * 0.002) * 3;
+  drawRocket(rocketPos.x, rocketPos.y, 3, rocketBob);
+  
+  // Подпись
+  if (hoveredIdx >= 0) {
+    const p = PLANETS[hoveredIdx];
+    const pos = positions[hoveredIdx];
+    const labelW = p.name.length * 9 + 24;
+    const labelY = pos.y + 95;
+    const labelX = pos.x - labelW / 2;
+    
+    ctx.fillStyle = 'rgba(10, 18, 35, 0.92)';
+    ctx.fillRect(labelX, labelY, labelW, 24);
+    ctx.strokeStyle = 'rgba(120, 160, 200, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(labelX + 0.5, labelY + 0.5, labelW - 1, 23);
+    ctx.fillStyle = '#E8F0FF';
+    ctx.font = '13px -apple-system, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(p.name, pos.x, labelY + 16);
+  }
+  
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>
