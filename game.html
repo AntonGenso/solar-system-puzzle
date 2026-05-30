@@ -27,6 +27,7 @@
   const params = new URLSearchParams(location.search);
   let LANG = params.get('lang');
   if (['uz','ru','en'].indexOf(LANG) < 0) LANG = 'ru';
+  const NICK = params.get('nickname') || '';
 
   const ORDER_DIST = ['mercury','venus','earth','mars','jupiter','saturn','uranus','neptune'];
   const ORDER_SIZE = ['mercury','mars','venus','earth','neptune','uranus','saturn','jupiter'];
@@ -55,7 +56,8 @@
     lvl1:{ru:'Орбиты',en:'Orbits',uz:'Orbitalar'},
     lvl2:{ru:'Размер',en:'Size',uz:'Hajm'},
     done:{ru:'Уровень пройден!',en:'Level complete!',uz:'Bosqich tugadi!'},
-    next:{ru:'Дальше',en:'Next',uz:'Keyingi'}
+    next:{ru:'Дальше',en:'Next',uz:'Keyingi'},
+    pilot:{ru:'Космонавт',en:'Astronaut',uz:'Kosmonavt'}
   };
   function t(k){ return (UI[k] && UI[k][LANG]) || (UI[k] && UI[k].en) || ''; }
   function nameOf(k){ return NAMES[LANG][k] || NAMES.en[k]; }
@@ -305,10 +307,12 @@
     ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.lineWidth=2; roundRect(m.x,m.y,m.w,m.h,m.h/2); ctx.stroke();
     label(t('menu'), m.x+m.w/2, m.y+m.h/2+10, '#F7ECCB', 28, 'center'); }
   function clearOverlay(){ ctx.fillStyle='rgba(6,12,24,0.80)'; ctx.fillRect(0,0,DW,DH);
+    if(NICK) label(t('pilot')+': '+NICK, DW/2, 500, '#AFC0D6', 22, 'center');
     label(t('done'), DW/2, 560, '#F7ECCB', 48, 'center');
     label(t('score')+': '+score+' / 50', DW/2, 628, '#FBC04A', 28, 'center');
     button(bigRect(), t('next'), 28); }
   function winOverlay(){ ctx.fillStyle='rgba(6,12,24,0.80)'; ctx.fillRect(0,0,DW,DH);
+    if(NICK) label(t('pilot')+': '+NICK, DW/2, 498, '#AFC0D6', 22, 'center');
     label(t('win'), DW/2, 560, '#F7ECCB', 56, 'center');
     label(t('score')+': '+(lockedScore+score)+' / 100', DW/2, 628, '#FBC04A', 30, 'center');
     button(winRetryRect(), t('retry'), 28);
