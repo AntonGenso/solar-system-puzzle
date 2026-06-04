@@ -102,9 +102,21 @@
   @media (prefers-reduced-motion:reduce){
     .title,.play,.langbar{animation:none;opacity:1;transform:none;}
   }
+  /* загрузчик меню */
+  #loader{position:fixed;inset:0;z-index:50;background:var(--bg);
+    display:flex;align-items:center;justify-content:center;
+    transition:opacity .45s ease;}
+  #loader.done{opacity:0;pointer-events:none;}
+  #loader .track{width:min(72vw,320px);height:14px;border-radius:999px;
+    background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);overflow:hidden;}
+  #loader .fill{height:100%;width:0%;border-radius:999px;
+    background:linear-gradient(90deg,var(--sun-1),var(--sun-2));
+    box-shadow:0 0 14px rgba(251,192,74,.5);}
 </style>
 </head>
 <body>
+  <div id="loader"><div class="track"><div class="fill" id="fill"></div></div></div>
+
   <nav class="langbar" id="langbar" aria-label="Language">
     <button data-lang="uz">UZ</button>
     <button data-lang="ru">RU</button>
@@ -149,6 +161,37 @@
 
     // Прокидываем nickname (и прочие параметры платформы) в игру
     document.getElementById('play').href = 'game.html' + (location.search || '');
+
+    // Загрузчик меню: гладкая оранжевая заливка, ждём фон + шрифты, минимум ~1.1с
+    (function(){
+      var loader = document.getElementById('loader');
+      var fill = document.getElementById('fill');
+      var imgReady = false, fontsReady = false;
+      var bg = new Image();
+      bg.onload = bg.onerror = function(){ imgReady = true; };
+      bg.src = 'assets/index_bg.webp';
+      (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve())
+        .then(function(){ fontsReady = true; });
+      setTimeout(function(){ imgReady = true; fontsReady = true; }, 3500); // страховка
+
+      var start = performance.now(), MIN = 1100, p = 0, finished = false;
+      function tick(now){
+        if(finished) return;
+        var ready = imgReady && fontsReady;
+        var target = ready ? 1 : 0.9;
+        p += (target - p) * 0.08;
+        if(target - p < 0.005) p = target;
+        fill.style.width = (p*100).toFixed(1) + '%';
+        if(ready && p >= 0.999 && (now - start) >= MIN){
+          finished = true;
+          loader.classList.add('done');
+          setTimeout(function(){ loader.style.display = 'none'; }, 480);
+          return;
+        }
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    })();
   </script>
 </body>
 </html>
