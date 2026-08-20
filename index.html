@@ -19,7 +19,11 @@
   }
   *{box-sizing:border-box;}
   html,body{margin:0;height:100%;}
+  html{background:#030910;}
   body{
+    /* центрированная колонка + transform: якорь для position:fixed потомков */
+    width:100%;max-width:480px;margin:0 auto;position:relative;
+    transform:translateZ(0);box-shadow:0 0 60px rgba(0,0,0,.85);
     font-family:'Press Start 2P','Pixelify Sans',system-ui,monospace;
     color:var(--cream);
     background:

@@ -9,7 +9,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
-  html,body{margin:0;height:100%;background:#06101e;overflow:hidden;}
+  html{margin:0;height:100%;background:#030910;overflow:hidden;}
+  /* центрированная «телефонная» колонка: на десктопе 480px, на мобиле весь экран */
+  body{margin:0 auto;height:100%;width:100%;max-width:480px;background:#06101e;overflow:hidden;position:relative;box-shadow:0 0 60px rgba(0,0,0,.85);}
   #game{display:block;width:100%;height:100%;touch-action:none;}
 </style>
 </head>
@@ -82,12 +84,12 @@
   let scale=1, offX=0, offY=0, DPR=1;
   function resize(){
     DPR = Math.min(window.devicePixelRatio||1, 2);
-    const w = window.innerWidth, h = window.innerHeight;
+    const w = document.body.clientWidth, h = document.body.clientHeight; // размеры колонки, не окна
     scale = Math.min(w/DW, h/DH); offX=(w-DW*scale)/2; offY=(h-DH*scale)/2;
     cv.width=Math.floor(w*DPR); cv.height=Math.floor(h*DPR); cv.style.width=w+'px'; cv.style.height=h+'px';
   }
   window.addEventListener('resize', resize);
-  function toDesign(cx,cy){ return {x:(cx-offX)/scale, y:(cy-offY)/scale}; }
+  function toDesign(cx,cy){ const r=cv.getBoundingClientRect(); return {x:(cx-r.left-offX)/scale, y:(cy-r.top-offY)/scale}; }
 
   const images={}; for(const k in SPRITES){ const im=new Image(); im.src=SPRITES[k]; images[k]=im; }
   function drawSprite(key,cx,cy,w){ const im=images[key]; if(!im||!im.complete||!im.naturalWidth) return;
